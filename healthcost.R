@@ -692,3 +692,47 @@ plotInferenceResults <- function(allOut, total=TRUE, xl, SLrslt, SLlibrary, t1,
   text(x=par()$usr[1],pos=2,y=length(SLlibrary),xpd=TRUE, expression(underline(paste("Covariates-interactions"))),cex=0.4)
 }
 
+
+hc.listWrappers <- function(what="both"){
+  if (what == "both") {
+    message("All prediction algorithm wrappers in healthcost:\n")
+    message("GLMs:\n")
+    print(c("SL.gammaIdentityGLM","SL.gammaLogGLM", "SL.gaussianLogGLM",
+            "SL.logOLS.smear", "SL.manningGLM"))
+    message("Survival-like methods:\n")
+    print(c("SL.coxph","SL.flexsurvreg", "SL.lognormalsurv", "SL.gengamma","SL.weibull",
+            "SL.gilleskie"))
+    message("Quantile-based methods:\n")
+    print(c("SL.wangZhou"))
+    message("  Nonparametric methods:\n")
+    print(c("SL.caret1",  "SL.gbm.caret1","SL.rf.caret1", "SL.rpart.caret1"))
+
+    message("\nAll screening algorithm wrappers in SuperLearner:\n")
+    print("No additional screening wrappers")
+  }
+  else if (what == "SL") {
+    message("All prediction algorithm wrappers in healthcost:\n")
+    message("   GLMs:\n")
+    print(c("SL.gammaIdentityGLM","SL.gammaLogGLM", "SL.gaussianLogGLM",
+            "SL.logOLS.smear", "SL.manningGLM"))
+    message("   Survival-like methods:\n")
+    print(c("SL.coxph","SL.flexsurvreg", "SL.lognormalsurv", "SL.gengamma","SL.weibull",
+            "SL.gilleskie"))
+    message("   Quantile-based methods:\n")
+    print(c("SL.wangZhou"))
+    message("  Nonparametric methods:\n")
+    print(c("SL.caret1",  "SL.gbm.caret1","SL.rf.caret1", "SL.rpart.caret1"))
+  }
+  else if (what == "screen") {
+    message("\nAll screening algorithm wrappers in SuperLearner:\n")
+    print("No additional screening wrappers")
+  }
+  else if (what == "method") {
+    message("All methods in SuperLearner package:\n")
+    print("No additional methods")
+  }
+  else {
+    stop("Please specify what = 'both', 'SL', or 'screen'")
+  }
+}
+
