@@ -9,7 +9,7 @@ output: html_document
 In this demonstration, we will illustrate the basic functionality of the `healthcost` package. We will illustrate how to integrate our algorithms with the existing `SuperLearner` R package. Using simulated data, we illustrate how to implement the algorithms designed specifically for estimating health care costs. We show how the performance of the Super Learner can be evaluated using cross-validation. Finally, we illustrate a function to estimate treatment effects using TMLE. 
 
 ## Installing healthcost package
-Until a proper R package is constructed, we can use a workaround to source the `healthcost` functions. The `source_https` function below reads in the functions from GitHub.
+Until a proper R package is constructed, we can use a workaround to source the `healthcost` functions directly from GitHub.
 
 ```{r sourcehttps, message=FALSE}
 require(RCurl)
@@ -107,7 +107,10 @@ cvsl1
 ```
 
 However, there is a nice plotting function to display the results:
-```{r cvPlot}
+```{r cvPlot, message=FALSE}
+# load ggplot2
+require(ggplot2)
+# plot cross-validated risk
 plot(cvsl1)
 ```
 
@@ -123,13 +126,13 @@ We can also check what is included in the `healthcost` software by default:
 hc.listWrappers()
 ```
 
-Note that both "prediction" algorithms and "screening algorithms are shown". We focus first on prediction algorithms. We can view the contents of the `SL.glm` algorithm:
+Note that both "prediction" and "screening"" algorithms are shown. We focus first on prediction algorithms. We can view the contents of the `SL.glm` algorithm:
 ```{r slglm}
 SL.glm
 ```
-We note that this function takes as input: `Y`, `X`, `newX`, `family`, `obsWeights`, and other arguments via `...`. We note also that for the analysis of health care cost data the `family` option in the call to `SuperLearner` should be set to `gaussian()` (which is the default), so that `Y` is treated as a continuous variable. This option has no bearing on the assumptions made by the Super Learner (i.e. we are not assuming that health costs are normally distributed), but rather it is simply an option passed through to each of the algorithms. This option thus allows one to, for example use a single prediction function when the outcome is both binary and continuous. 
+We note that this function takes as input: `Y`, `X`, `newX`, `family`, `obsWeights`, and other arguments via `...`. For the analysis of health care cost data the `family` option in the call to `SuperLearner` should be set to `gaussian()` (which is the default), so that `Y` is treated as a continuous variable. This option has no bearing on the assumptions made by the Super Learner (i.e., we are not assuming that health costs are normally distributed), but rather, this option is simply passed through to each of the prediction algorithms. This allows one to, for example use a single prediction function when the outcome is both binary and continuous. 
 
-The output of the prediction algorithm is a list with components `pred`, a vector of predictions computed on the `newX` object, and `fit`, basically anything else that (1) is used for predicting new values later; or (2) is desired to acces later via the `fitLibrary` component of the `SuperLearner` object. Because this `fit` object may be used for prediction later, it is important to specify its class so that an S3 predict method can be used on the object later. Note that such a method is already included for `SL.glm`: 
+The output of the prediction algorithm is a list with components `pred`, a vector of predictions computed on the `newX` object, and `fit`, which contains anything that is (1) used for predicting new values later; or (2) desired for later access via the `fitLibrary` component of the `SuperLearner` object. Because this `fit` object may be used for prediction later, it is important to specify its class so that an S3 predict method can be used on the object later. Note that such a method is already included for `SL.glm`: 
 ```{r predslglm}
 predict.SL.glm
 ```
@@ -137,7 +140,9 @@ predict.SL.glm
 This input/output structure is all that is needed to define a new prediction algorithm for `SuperLearner`. 
 
 As an illustration, we could write a new algorithm specifying a new `glm` algorithm that uses the Gamma error distribution, log link, and a natural spline of degree `d` for any variable with more than `cts.num` unique values, where `d` and `cts.num` are some values chosen by the user: 
-```{r newglm}
+```{r newglm, message=FALSE}
+require(splines)
+
 SL.gammaLogGLM.ns <- function(Y, X, newX, family, obsWeights,
                               cts.num=4, d=3, ...){
   # check which variables in X have at least cts.num unique values
@@ -179,10 +184,10 @@ SL.gammaLogGLM.ns2 <- function(...,d=2){
 
 These new algorithms can now be added to the library we used previously: 
 ```{r newsl, cache=TRUE, warning=FALSE}
-set.seed(1234)
+set.seed(12345)
 
 sl2 <- SuperLearner(
-  Y = dat$totalcost, 
+  Y = dat$totalcost,
   X = dat[,c("female","sofa","race","trt")], 
   SL.library = c("SL.gammaLogGLM","SL.gammaIdentityGLM","SL.manningGLM","SL.gammaLogGLM.ns","SL.gammaLogGLM.ns2"))
 
@@ -276,3 +281,43 @@ allWangZhou <- allObjects[wangZhouObjects]
 allWangZhou
 ```
 
+We can now use Super Learner to evaluate the performance of the Wang (2009) method using various tuning parameter values:
+```{r wangzhousl, message=FALSE, warning=FALSE, cache=TRUE}
+sl4 <- SuperLearner(
+  Y=dat$totalcost, 
+  X=dat[,c("female","sofa","race","trt")],
+  SL.library=allWangZhou  
+  )
+
+sl4
+```
+
+
+## Combining Super Learner with the `caret` package
+The `caret` package provides a uniform approach to tuning parameter selection for a number of algorithms (for a full list, see http://topepo.github.io/caret/modelList.html). This provides a way to include algorithms in the Super Learner that implicitly use cross-validation. For example, one candidate algorithm in the Super Learner might use a gradient boosted machine with fixed values for tuning parameters, while another candidate algorithm uses a gradient boosted machine with tuning parameters determined adaptively (e.g., through twenty-fold cross-validation). 
+
+The `SuperLearner` package provides an algorithm `SL.caret` to use caret to train an algorithm. The `healthcost` package provides a slight modification of this function `SL.caret1` that fixes an issue dealing with the output from models trained using `caret` when `verbose = TRUE`. The `healthcost` package further supplies several algorithms for using caret with regression trees (`SL.rpart.caret1`), random forests (`SL.rf.caret1`), and gradient boosted machines (`SL.gbm.caret1`). 
+
+As a brief demonstration, we illustrate the implementation of a Super Learner that uses three gradient boosted machine algorithms: `SL.gbm` uses fixed tuning parameters (`gbm.trees=10000` and `interaction.depth=2`); `SL.gbm.caret1` uses ten-fold cross validation to select these tuning parameters from a grid of eight possible values; `SL.gbm.caret2` uses ten-fold cross validation to select tuning parameters also from a grid of eight possible values. First we must define `SL.gbm.caret2`:
+```{r gbmcaret2, message=FALSE}
+SL.gbm.caret2 <- function(...,method="gbm",tuneLength=8, trControl=trainControl(method="cv",number=10,verboseIter=FALSE)){
+  SL.caret1(...,method=method,tuneLength=tuneLength,trControl=trControl)
+}
+```
+
+We can now implement the Super Learner. Note that the run time on this Super Learner will be a bit longer than previous runs due to the additional layers of cross validation.  
+```{r sl5, message=FALSE, warnings=FALSE, cache=TRUE}
+# load caret and gbm package
+require(caret)
+require(gbm)
+
+set.seed(12345)
+# fit super learner using three GBMs
+sl5 <- SuperLearner(
+  Y=dat$totalcost, 
+  X=dat[,c("female","sofa","race","trt")],
+  SL.library=c("SL.gbm","SL.gbm.caret1","SL.gbm.caret2")  
+  )
+
+sl5
+```
