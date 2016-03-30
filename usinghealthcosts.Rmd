@@ -1,0 +1,249 @@
+---
+title: "Using the healthcost package"
+author: "David Benkeser"
+date: "March 29, 2016"
+output: html_document
+---
+## Introduction
+
+In this demonstration, we will illustrate the basic functionality of the `healthcost` package. We will illustrate how to integrate our algorithms with the existing `SuperLearner` R package. Using simulated data, we illustrate how to implement the algorithms designed specifically for estimating health care costs. We show how the performance of the Super Learner can be evaluated using cross-validation. Finally, we illustrate a function to estimate treatment effects using TMLE. 
+
+## Installing healthcost package
+
+
+## Basic Super Learner Functionality
+We begin by illustrating a simple execution of the Super Learner function using the SMOCC data and default algorithms. Start by loading the necessary packages:
+```{r packages, message=FALSE, warning=FALSE}
+require(hbgd)
+require(SuperLearner)
+```
+For consistency, we will begin by formatting the SMOCC data to be compatible with the `hbgd` package:
+```{r smocc, message=FALSE}
+smcFull <- brokenstick::smocc.hgtwgt
+# fix subjid and agedays names
+names(smcFull)[2] <- "subjid"
+names(smcFull)[5] <- "agedays"
+# fix sex variable ("male" -> "Male", "female" -> "Female")
+smcFull$sex <- as.character(smcFull$sex)
+smcFull$sex[smcFull$sex == "male"] <- "Male"
+smcFull$sex[smcFull$sex == "female"] <- "Female"
+# fix htcm and wtkg names
+names(smcFull)[10] <- "htcm"
+names(smcFull)[11] <- "wtkg"
+# fix height for age z-score
+names(smcFull)[12] <- "haz"
+smcFull$waz <- who_wtkg2zscore(smcFull$agedays, smcFull$wtkg, smcFull$sex)
+smcFull$agedays <- years2days(smcFull$agedays)
+# get only the first 2000 rows
+smc <- smcFull[1:2000,]
+```
+We will now execute a basic call to Super Learner:
+```{r basicSL, cache=TRUE, message=FALSE, warning=FALSE}
+# Because CV is used, must set seed to have reproducible results
+set.seed(12516) 
+
+# Fit the Super Learner
+sl1 <- SuperLearner(
+  Y=smc$htcm, # the outcome is height in centimeters
+  X=data.frame(agedays=smc$agedays), # the only predictor is age in days
+  id=smc$subjid, # specify id variable so CV samples full subjects
+  family=gaussian(), # more on this option later
+  SL.library=c("SL.glm","SL.gam","SL.loess"), # the 'library' of algorithms to use
+  method="method.NNLS", # use non-negative least squares to compute ensemble (default)
+  verbose=FALSE, # don't print messages about what it's doing (default)
+  cvControl=list(V=10L), # use 10 fold CV (default)
+)
+```
+See `?SuperLearner` for a complete description of the inputs for the `SuperLearner` function. The `family` option will be discussed when we illustrate how to write new algorithms for use in SuperLearner. The above call to `SuperLearner` used 10-fold cross validation to evaluate the algorithms `SL.glm` (linear regression model), `SL.gam` (generalized additive model), and `SL.loess` (univariate loess smoothing). Specifying `method="method.NNLS"` means that these three algorithms will be evaluated based on their mean-squared error. We can check out the results to see which weighted combination of algorithms minimized this criteria:
+```{r slResults}
+sl1
+```
+From the output, we see that the cross-validated risk was lowest for the `r names(which(sl1$cvRisk==min(sl1$cvRisk)))`
+algorithm, which is simply the loess smoother (we will discuss why `_All` has been added to the output when we discuss screening functions below). The estimator with the lowest cross-validated risk is known as the discrete Super Learner -- discrete because it only uses predictions from a single model. The best weighted combination of algorithms is known as the continuous Super Learner and in this case consists of the `r paste0(names(which(sl1$coef > 0)),collapse=" and ")` algorithms. 
+
+We can now use a call to predict to obtain predictions for every child in the data set: 
+```{r slPredict}
+# default call to predict
+slPred <- predict(sl1)
+# slPred is a list with two components
+#   pred = continuous SL predictions
+#   library.predict = predictions from each algorithm
+
+# store the continuous SL predictions
+cslPred <- slPred$pred
+
+# get the discrete SL predictions
+dslPred <- slPred$library.predict[,which(sl1$cvRisk==min(sl1$cvRisk))]
+```
+
+We can also do the same thing to get predictions using data from a new child using the `newdata` option:
+```{r slPredictNew, message=FALSE}
+# predict height for random kid in full data set
+newKid <- smcFull[smcFull$subjid==72053,]
+
+# all predictions
+slPredNew <- predict(sl1,newdata=data.frame(agedays=newKid$agedays))
+
+# continuous SL prediction
+cslPredNew <- slPredNew$pred
+
+# discrete SL prediction
+dslPredNew <- slPredNew$library.predict[,which(sl1$cvRisk==min(sl1$cvRisk))]
+```
+
+We can illustrate the fit with a simple plot of the observed and the predicted values: 
+```{r plot1}
+plot(htcm ~ agedays, data=newKid, bty="n",pch=1, xlim=c(0,800),ylim=c(50,90))
+lines(cslPredNew ~ newKid$agedays, type="b",col=2)
+legend(x="bottomright",col=c(1,2), legend=c("Observed", "Continuous SL prediction"),pch=1,bty="n")
+```
+
+Finally, we note that if one wishes to access the fitted object for any of the component algorithms (fit using all the data), this can be accessed through the `fitLibrary` component of the `SuperLearner` object. For example, to access the `glm` object from the `SL.glm` algorithm, we can use:
+```{r fitlib}
+glmObject <- sl1$fitLibrary$SL.glm_All$object
+summary(glmObject)
+```
+
+
+## Evaluating the Super Learner
+The `SuperLearner` package comes with an additional function to objectively evaluate the performance of the SuperLearner predictions relative to those from its component methods. This is achieved by adding an additional outer layer of V-fold cross-validation to the procedure. That is the data is split into, for example ten equally sized pieces and each algorithm is trained on nine-tenths of the data -- including the Super Learner, which itself uses 10-fold cross-validation -- and evaluated on the remaining piece. Each piece of data serves as the evaluation set once and the cross-validated risk of the Super Learner and each component algorithm is computed. This can be achieved through use of the `CV.SuperLearer` function:
+
+```{r cvSuperLearner, message=FALSE, cache=TRUE, warning=FALSE}
+set.seed(12865)
+
+cvsl1 <- CV.SuperLearner(
+  Y=smc$htcm, 
+  X=data.frame(agedays=smc$agedays), 
+  V=10, # the number of folds for outer layer of CV (default is 20, but we'll use 10 for computational simplicity)
+  id=smc$subjid,
+  family=gaussian(), # more on this option later
+  SL.library=c("SL.glm","SL.gam","SL.loess"),
+  method="method.NNLS", 
+  verbose=FALSE, 
+  cvControl=list(V=10L), # use 10 fold CV (default)
+  parallel="seq" # sequentially fit 10 folds (parallel computing is supported, but not pursued here)
+)
+```
+
+The object itself is not that informative:
+```{r cvObj}
+cvsl1
+```
+
+However, there is a nice plotting function to display the results:
+
+```{r cvPlot}
+plot(cvsl1)
+```
+
+The plot shows the ordered cross-validated risk estimates for each of the candidate algorithms including the discrete and continuous Super Learner. 
+
+## Writing Algorithms for SuperLearner
+We now discuss how to supply new algorithms to the `SuperLearner` function. First, it is useful to check out what is included by default: 
+```{r listwrap}
+listWrappers()
+```
+
+Note that both "prediction" algorithms and "screening algorithms are shown". We will focus on prediction algorithms for the time being. Let's first take a look at the `SL.glm` algorithm:
+```{r slglm}
+SL.glm
+```
+We note that this function takes as input: `Y`, `X`, `newX`, `family`, `obsWeights`, and other arguments via `...`. We note also that the `family` option in the call to `SuperLearner` is passed through to each of the algorithms, which allows one to, for example use a single prediction function when the outcome is both binary and continuous. The output of the prediction algorithm is a list with components `pred`, a vector of predictions computed on the `newX` object, and `fit`, basically anything else that (1) is used for predicting new values later; or (2) you would like to eventually access via the `fitLibrary` component of the `SuperLearner` object. Because this `fit` object may be used for prediction later, it is important to specify its class so that an S3 predict method can be used on the object later. Note that such a method is already included for `SL.glm`: 
+```{r predslglm}
+predict.SL.glm
+```
+
+This input/output structure is all that is needed to define a new prediction algorithm for `SuperLearner`. 
+
+As an illustration, we could write a new algorithm specifying a new `glm` algorithm that uses a natural spline for age: 
+```{r newglm}
+SL.glm.ns <- function(Y, X, newX, family, obsWeights, d=3, ...){
+  # fit glm with natural spline of degree d
+  fit.glm <- glm(Y ~ ns(agedays, df=d), data=X, family=family, weights=obsWeights)
+  # get predictions
+  pred <- predict(fit.glm, newdata=newX, type="response")
+  # save the fit object
+  fit <- list(object=fit.glm)
+  # because this is simply a different form of glm, we can use predict.SL.glm to get predictions back, i.e. no need to write a new predict function
+  class(fit) <- "SL.glm"
+  
+  out <- list(pred=pred, fit=fit)
+  return(out)
+}
+```
+We have now defined a new algorithm for use in the SuperLearner. Note that this is not an algorithm that could be used generally, as it requires `X` to have a column named `agedays`. A more general algorithm could be written that uses a natural spline for all continuous variables (see `SL.gam` for how this could be done).
+
+Note that it is also trivial to include existing algorithms with different tuning parameter values. For example, if we wanted to include a natrual spline of degree two, we could simply define: 
+```{r newglm2}
+SL.glm.ns2 <- function(...,d=2){
+  SL.glm.ns(...,d=d)
+}
+```
+
+These new algorithms can now be included in the Super Learner: 
+```{r newsl, cache=TRUE, warning=FALSE}
+set.seed(1256)
+
+sl2 <- SuperLearner(
+  Y=smc$htcm, 
+  X=data.frame(agedays=smc$agedays), 
+  id=smc$subjid, 
+  family=gaussian(),
+  SL.library=c("SL.glm","SL.gam","SL.loess","SL.glm.ns","SL.glm.ns2"), 
+  method="method.NNLS", 
+  verbose=FALSE, 
+  cvControl=list(V=10L)
+)
+
+sl2
+```
+
+Let's make sure that `predict.SL.glm` works for our new algorithms:
+```{r newslpred}
+slPredNew2 <- predict(sl2,newdata=data.frame(agedays=newKid$agedays))
+slPredNew2
+```
+
+We now briefly discuss screening algorithms. As the name suggests, these are algorithms that specify a screening step before the prediction algorithm is applied. `SuperLearner` will apply this screening step prior to training algorithms in each of the V training steps. Let's take a look at how screening algorithms are constructed:
+```{r screenalg}
+write.screen.template()
+```
+
+We see that screening algorithms take the same input as prediction algorithms, but output a logical vector with `TRUE` indicating that a column of `X` should be used in the prediction step. To illustrate why these functions are useful, we will now consider the problem of predicting height based on both age in days and sex. We will use the same algorithms as above, but now will consider each algorithm with and without an interaction between age and sex.
+
+Let's first set up a new data frame for use with `SuperLearner`
+```{r newdata}
+myX <- data.frame(agedays=smc$agedays,
+                  sex=as.numeric(smc$sex=="Female"),
+                  int=as.numeric(smc$sex=="Female")*smc$agedays)
+```
+
+Now let's write a screening algorithm that removes the interaction:
+```{r noint}
+noInt <- function(X,...){
+  return(c(TRUE,TRUE,FALSE))
+}
+```
+
+Now we can fit the SuperLearner using the three original algorithms each with and without the interaction. The call to `SuperLearner` is nearly identical; however, we now specify `SL.library` as a list, where each component is a vector of the form `c(predictionAlgorithm,screeningAlgorithm)`. To include the interaction, we specify the `All` screening algorithm that is included in the `SuperLearner` package.
+```{r intSL, cache=TRUE, warning=FALSE}
+set.seed(12516) 
+
+# Fit the Super Learner
+sl3 <- SuperLearner(
+  Y=smc$htcm, 
+  X=myX,
+  id=smc$subjid, 
+  family=gaussian(),
+  SL.library=list(c("SL.glm","All"),c("SL.glm","noInt"),
+                  c("SL.gam","All"),c("SL.gam","noInt"),
+                  c("SL.loess","All"),c("SL.loess","noInt")),
+  method="method.NNLS", 
+  verbose=FALSE, 
+  cvControl=list(V=10L)
+)
+
+sl3
+```
+
+It is now apparent why the output for `sl1` contained the "_All" addendum -- by default `SuperLearner` uses all the `All` screening function. This flexibility in combining screening and prediction functions allows one to easily implement many methods using different combinations of covariates. 
