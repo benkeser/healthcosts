@@ -298,14 +298,14 @@ The `caret` package provides a uniform approach to tuning parameter selection fo
 
 The `SuperLearner` package provides an algorithm `SL.caret` to use caret to train an algorithm. The `healthcost` package provides a slight modification of this function `SL.caret1` that fixes an issue dealing with the output from models trained using `caret` when `verbose = TRUE`. The `healthcost` package further supplies several algorithms for using caret with regression trees (`SL.rpart.caret1`), random forests (`SL.rf.caret1`), and gradient boosted machines (`SL.gbm.caret1`). 
 
-As a brief demonstration, we illustrate the implementation of a Super Learner that uses three gradient boosted machine algorithms: `SL.gbm` uses fixed tuning parameters (`gbm.trees=10000` and `interaction.depth=2`); `SL.gbm.caret1` uses ten-fold cross validation to select these tuning parameters from a grid of eight possible values; `SL.gbm.caret2` uses ten-fold cross validation to select tuning parameters also from a grid of eight possible values. First we must define `SL.gbm.caret2`:
+As a brief demonstration, we illustrate the implementation of a Super Learner that uses three gradient boosted machine algorithms: `SL.gbm` uses fixed tuning parameters (`gbm.trees=10000` and `interaction.depth=2`); `SL.gbm.caret1` uses twenty-fold cross validation (the default) to select these tuning parameters from a grid of eight possible values; `SL.gbm.caret2` uses ten-fold cross validation to select tuning parameters also from a grid of eight possible values. First we must define `SL.gbm.caret2`:
 ```{r gbmcaret2, message=FALSE}
 SL.gbm.caret2 <- function(...,method="gbm",tuneLength=8, trControl=trainControl(method="cv",number=10,verboseIter=FALSE)){
   SL.caret1(...,method=method,tuneLength=tuneLength,trControl=trControl)
 }
 ```
 
-We can now implement the Super Learner. Note that the run time on this Super Learner will be a bit longer than previous runs due to the additional layers of cross validation.  
+We can now implement the Super Learner. Note that the run time on this Super Learner will be considerably longer than previous runs due to the additional layers of cross validation.
 ```{r sl5, message=FALSE, warnings=FALSE, cache=TRUE}
 # load caret and gbm package
 require(caret)
@@ -321,3 +321,6 @@ sl5 <- SuperLearner(
 
 sl5
 ```
+
+
+

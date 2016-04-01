@@ -522,18 +522,63 @@ SL.gbm.caret1 <- function(...,method="gbm",tuneLength=8){
   SL.caret1(...,method=method,tuneLength=tuneLength)
 }
 
-my.tmle <- function(Y,X,fm,X0,X1){
-  X$H0 <- as.numeric(X$trt==0)/(1-mean(X$trt))
-  X$H1 <- as.numeric(X$trt==1)/mean(X$trt)
-  X0$H0 <- 1/(1-mean(X$trt)); X0$H1 <- 0
-  X1$H0 <- 0; X1$H1 <- 1/mean(X$trt)
+hc.tmle <- function(Y,X,X0,X1,fm,trt,onlySL=FALSE,
+                    divider=1, # factor to divide results by
+                    digits=1 # digits to round to after divider is used
+                    ){
+  if(length(unique(X[,"trt"]))>2 | any(!(unique(X[,"trt"]) %in% c(0,1)))){
+    stop("trt variable should only have two unique values - (0,1)")
+  }
+  
+  if(all(X1==X0)){
+    warning("X1 and X0 are exactly the same. Are you sure there is a trt variable?")
+  }
+  
+  if(class(fm)!="SuperLearner"){
+    stop("fm is not of class SuperLearner")
+  }
+  
+  allPred <- predict(fm)
+  allPred1 <- predict(fm, newdata=X1,onlySL=FALSE)
+  allPred0 <- predict(fm, newdata=X0,onlySL=FALSE)
+  
+  out.SL <- get.tmle(Y=Y,X0=X0,X1=X1,X=X,divider=divider,digits=digits,trt=trt,
+                     allPred=allPred$pred, allPred1=allPred1$pred,
+                     allPred0=allPred0$pred)
+  
+  # get inference for other methods as well
+  out.All <- NULL
+  if(!onlySL){
+    listMethods <- alply(1:ncol(allPred$library.predict), 1, function(x){
+      cbind(allPred$library.predict[,x],allPred0$library.predict[,x],
+            allPred1$library.predict[,x])
+    })
+    out.All <- lapply(listMethods, FUN=function(x){
+      get.tmle(Y=Y,X0=X0,X1=X1,X=X,divider=divider,digits=digits,trt=trt,
+               allPred=x[,1], allPred1=x[,3],
+               allPred0=x[,2])
+    })
+    names(out.All) <- fm$libraryNames
+  }
+  
+  # format output
+  out <- list(SL=out.SL, All=invisible(out.All))
+  class(out) <- "hc.tmle"
+  out
+}
+
+
+get.tmle <- function(allPred,allPred1,allPred0,X,X0,X1,Y,trt,
+                     divider, digits){
+  X$H0 <- as.numeric(X[,trt]==0)/(1-mean(X[,trt]))
+  X$H1 <- as.numeric(X[,trt]==1)/mean(X[,trt])
+  X0$H0 <- 1/(1-mean(X[,trt])); X0$H1 <- 0
+  X1$H0 <- 0; X1$H1 <- 1/mean(X[,trt])
   
   # predicted values
-  X$QobsT <- predict(fm)[[1]]
-  Q1T <- predict(fm, newdata=X1,onlySL=TRUE)$pred
-  Q0T <- predict(fm, newdata=X0,onlySL=TRUE)$pred
-  X1$QobsT <- Q1T
-  X0$QobsT <- Q0T
+  X$QobsT <- allPred
+  X1$QobsT <- allPred1
+  X0$QobsT <- allPred0
   
   fmFluc <- glm(Y ~ -1 + offset(QobsT) + H0 + H1, data=X)
   Q1StarT <- predict(fmFluc, newdata=X1)
@@ -549,41 +594,17 @@ my.tmle <- function(Y,X,fm,X0,X1){
   seTDiff <- sqrt(t(a)%*%covMatT%*%a / length(Y))
   
   #confidence intervals
-  out <- list(round(as.numeric(psi1T + c(0,-1.96, 1.96)%o%sqrt(covMatT[1,1]/length(dat$totalcost)))/1000,1),
-              round(as.numeric(psi0T + c(0,-1.96, 1.96)%o%sqrt(covMatT[2,2]/length(dat$totalcost)))/1000,1),
-              round(as.numeric(psi1T - psi0T + c(0,-1.96, 1.96)%o%seTDiff)/1000,1),
+  out <- list(round(as.numeric(psi1T + c(0,-1.96, 1.96)%o%sqrt(covMatT[1,1]/length(Y)))/divider,digits),
+              round(as.numeric(psi0T + c(0,-1.96, 1.96)%o%sqrt(covMatT[2,2]/length(Y)))/divider,digits),
+              round(as.numeric(psi1T - psi0T + c(0,-1.96, 1.96)%o%seTDiff)/divider,digits),
               round(2*pnorm(-abs(psiTDiff/seTDiff)),5))
-  
-  names(out) <- c("trt","cntrl","diff","pval")
-  out
-  # direct costs
-  # QobsD <- predict(fmD)[[1]]
-  # Q1D <- predict(fmD, newdata=X1,onlySL=TRUE)$pred
-  # Q0D <- predict(fmD, newdata=X0,onlySL=TRUE)$pred
-  # X1$QobsD <- Q1D
-  # X0$QobsD <- Q0D
-  # 
-  # fmFlucD <- glm(dat$directcost ~ -1 + offset(QobsD) + H0 + H1, data=X)
-  # Q1StarD <- predict(fmFlucD, newdata=X1)
-  # Q0StarD <- predict(fmFlucD, newdata=X0)
-  # psi1D <- mean(Q1StarD)
-  # psi0D <- mean(Q0StarD)
-  # D1StarD <- X$H1 * (dat$directcost - Q1StarD) + Q1StarD - mean(Q1StarD)
-  # D0StarD <- X$H0 * (dat$directcost - Q0StarD) + Q0StarD - mean(Q0StarD)
-  # DD <- matrix(rbind(D1StarD, D0StarD),nrow=2)
-  # covMatD <- DD%*%t(DD)/length(dat$directcost)
-  # a <- matrix(c(1, -1),nrow=2)
-  # psiDDiff <- psi1D - psi0D
-  # seDDiff <- sqrt(t(a)%*%covMatD%*%a / length(dat$directcost))
-  # 
-  # #confidence intervals
-  # round(as.numeric(psi1D + c(0,-1.96, 1.96)%o%sqrt(covMatD[1,1]/length(dat$totalcost)))/1000,1)
-  # round(as.numeric(psi0D + c(0,-1.96, 1.96)%o%sqrt(covMatD[2,2]/length(dat$totalcost)))/1000,1)
-  # round(as.numeric(psi1D - psi0D + c(0,-1.96, 1.96)%o%seDDiff)/1000,1)
-  # round(pnorm(psiDDiff/seDDiff),2)
-  
+  names(out) <- c("trt1","trt0","diff","pval")
+  return(out)
 }
 
+print.hc.tmle <- function(x,...){
+  print(x$SL)
+}
 
 genLabels <- function(sl){
   out <- lapply(sl, function(x){
