@@ -997,3 +997,66 @@ hc.listWrappers <- function(what="both"){
     stop("Please specify what = 'both', 'SL', or 'screen'")
   }
 }
+
+#============================================================
+# make method object to use with Super Learner for 
+# bounded log-likelihood loss
+#============================================================
+makeBoundedMethod <- function(upperBound,lowerBound,
+                              name="method.CC_nloglik.Bounded"){
+  eval(parse(text=paste0(name, "<<- list(
+                         require='nloptr',
+                         computeCoef= function (Z, Y, libraryNames, obsWeights, control, verbose, 
+                         lowerBound=",lowerBound,", upperBound=",upperBound,", ...){
+                         transZ <- (Z - lowerBound) / (upperBound - lowerBound)
+                         transY <- (Y - lowerBound) / (upperBound - lowerBound)
+                         logitZ <- trimLogit(transZ, control$trimLogit)
+                         cvRisk <- apply(logitZ, 2, function(x){
+                         -mean(obsWeights * (transY * plogis(x, log.p = TRUE) + 
+                         (1-transY) * plogis(x, log.p = TRUE,lower.tail = FALSE)))
+                         })
+                         names(cvRisk) <- libraryNames
+                         obj_and_grad <- function(y, x, w = NULL) {
+                         y <- y
+                         x <- x
+                         function(beta) {
+                         xB <- x %*% cbind(beta)
+                         loglik <- y * plogis(xB, log.p = TRUE) + (1 - y) * 
+                         plogis(xB, log.p = TRUE, lower.tail = FALSE)
+                         if (!is.null(w)) 
+                         loglik <- loglik * w
+                         obj <- - sum(loglik)
+                         p <- plogis(xB)
+                         grad <- if (is.null(w)) 
+                         crossprod(x, cbind(p - y))
+                         else crossprod(x, w * cbind(p - y))
+                         list(objective = obj, gradient = grad)
+                         }
+                         }
+                         r <- nloptr::nloptr(x0 = rep(1/ncol(Z), ncol(Z)), 
+                         eval_f = obj_and_grad(transY, logitZ), 
+                         lb = rep(0, ncol(Z)), ub = rep(1, ncol(Z)), 
+                         eval_g_eq = function(beta) (sum(beta) - 1), 
+                         eval_jac_g_eq = function(beta) rep(1,length(beta)), 
+                         opts = list(algorithm = 'NLOPT_LD_SLSQP',xtol_abs = 1e-08))
+                         if (r$status < 1 || r$status > 4) {
+                         warning(r$message)
+                         }
+                         coef <- r$solution
+                         if (any(is.na(coef))) {
+                         warning('Some algorithms have weights of NA, setting to 0.')
+                         coef[is.na(coef)] <- 0
+                         }
+                         coef[coef < 1e-04] <- 0
+                         coef <- coef/sum(coef)
+                         out <- list(cvRisk = cvRisk, coef = coef)
+                         return(out)
+                         },
+                         computePred=function (predY, coef, control, 
+                         lowerBound=",lowerBound,", upperBound=",upperBound,", ...){
+                         plogis(trimLogit((predY-lowerBound)/(upperBound - lowerBound), trim = control$trimLogit) %*% matrix(coef))*(upperBound - lowerBound) + lowerBound
+                         }
+  )
+                         ")))
+  cat(name," (logit ensemble) read into Global environment using upperBound =",upperBound," and lowerBound =",lowerBound)
+}
