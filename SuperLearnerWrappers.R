@@ -1134,17 +1134,21 @@ my.summary.CV.SuperLearner <- function (object, obsWeights = NULL, ...)
     b <- as.numeric(strsplit(grbg[2],",")[[1]][1])
     for (ii in seq_len(V)) {
       # replace extrapolated predictions
-      SL.predict[folds[[ii]]][SL.predict[folds[[ii]]] <= a] <- a + 1e-5
-      SL.predict[folds[[ii]]][SL.predict[folds[[ii]]] >= b] <- b - 1e-5
+      SL.pred <- SL.predict[folds[[ii]]]
+      dSL.pred <- discreteSL.predict[folds[[ii]]]
+      SL.pred[SL.pred <= a] <- a + 1e-5
+      SL.pred[SL.pred >= b] <- b - 1e-5
+      dSL.pred[dSL.pred <= a] <- a + 1e-5
+      dSL.pred[dSL.pred >= b] <- b - 1e-5
       librarypred <- library.predict[folds[[ii]], , drop = FALSE]
       librarypred[librarypred <= a] <- a + 1e-5
-      librarypred[librarypred >= b] <- b- 1e-5
+      librarypred[librarypred >= b] <- b - 1e-5
       
-      Risk.SL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log(SL.predict[folds[[ii]]]-a/(b-a))
-                           + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (SL.predict[folds[[ii]]]-a)/(b-a)))
+      Risk.SL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((SL.pred-a)/(b-a))
+                           + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (SL.pred[folds[[ii]]]-a)/(b-a)))
       
-      Risk.dSL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((discreteSL.predict[folds[[ii]]]-a)/(b-a))
-                            + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (discreteSL.predict[folds[[ii]]]-a)/(b-a)))
+      Risk.dSL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((dSL.pred-a)/(b-a))
+                            + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (dSL.pred-a)/(b-a)))
       Risk.library[, ii] <- apply(librarypred, 2, function(x) {
         -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((x-a)/(b-a))
               + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (x-a)/(b-a)))
