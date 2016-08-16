@@ -14,7 +14,7 @@ for (pkg in pkgs) {
 }
 
 # load Super Learner functions from github
-eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/SuperLearnerWrappers.R")))
+eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthcosts.R")))
 
 # load analysis specific functions from github
 eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/Mock%20FCS%20Analysis/AnalysisFunctions.R")))
