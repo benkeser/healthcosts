@@ -1145,7 +1145,7 @@ my.summary.CV.SuperLearner <- function (object, obsWeights = NULL, ...)
       librarypred[librarypred >= b] <- b - 1e-5
       
       Risk.SL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((SL.pred-a)/(b-a))
-                           + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (SL.pred[folds[[ii]]]-a)/(b-a)))
+                           + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (SL.pred-a)/(b-a)))
       
       Risk.dSL[ii] <- -mean(obsWeights[folds[[ii]]] * (Y[folds[[ii]]] - a)/(b-a) * log((dSL.pred-a)/(b-a))
                             + (1 - (Y[folds[[ii]]] - a)/(b-a)) * log(1 - (dSL.pred-a)/(b-a)))
