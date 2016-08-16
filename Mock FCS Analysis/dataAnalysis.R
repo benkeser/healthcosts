@@ -6,15 +6,28 @@
 # Reading data, loading libraries
 #=========================================
 require(RCurl)
+require(SuperLearner)
+require(glmnet)
+require(gbm)
+require(randomForest)
+require(survival)
 
-# load the health cost functions from github
+# load Super Learner functions from github
 eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/SuperLearnerWrappers.R")))
 
+# load analysis specific functions from github
+eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/Mock%20FCS%20Analysis/AnalysisFunctions.R")))
+
 # load the simulated data from github
-healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthdata.csv")
+healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/Mock%20FCS%20Analysis/healthdata.csv")
 
 dat <- read.csv(textConnection(healthdata),header=TRUE)
-# source in functions
+
+# create interaction variables
+dat$sofaInt <- dat$trt*dat$sofa
+dat$scoreInt <- dat$trt*dat$score
+dat$femaleInt <- dat$trt*dat$female
+dat$raceInt <- dat$trt*dat$race
 
 #=========================================
 # Set up Super Learner Library
@@ -77,9 +90,9 @@ X1$score <- X1$score
 X0[,grep("Int",names(X0))] <- 0
 
 
-#=================================
+#==================
 # Total ICU costs
-#=================================
+#==================
 # generate sample splits based on ordered total ICU costs
 ordTC <- order(-dat$totalcost)
 v <- rep(c(1:10,10:1),10)[1:nrow(dat)]
