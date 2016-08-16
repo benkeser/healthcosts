@@ -5,8 +5,15 @@
 #=========================================
 # Reading data, loading libraries
 #=========================================
-# read data
+require(RCurl)
 
+# load the health cost functions from github
+eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/SuperLearnerWrappers.R")))
+
+# load the simulated data from github
+healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthdata.csv")
+
+dat <- read.csv(textConnection(healthdata),header=TRUE)
 # source in functions
 
 #=========================================
@@ -159,14 +166,17 @@ Y <- dat$totalcost
 fm <- CV.SuperLearner(Y = Y, X = X, V=10,
                       SL.library = mySLlibrary, verbose=TRUE,
                       method = "methodTotal")
+# cross-validated risk plot
+plot.my.CV.SuperLearner(fm)
 
 # direct cost
 Y <- dat$directcost
 fmD <- CV.SuperLearner(Y=Y,X=X,V=20,family=gaussian(), SL.library=mySLlibrary,
                     verbose=TRUE, method="methodDirect")
 
+# cross-validated risk plot
+plot.my.CV.SuperLearner(fmD)
 
-## add in cross-validated risk plot
 
 
 
