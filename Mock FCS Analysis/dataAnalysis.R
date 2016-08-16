@@ -5,12 +5,13 @@
 #=========================================
 # Reading data, loading libraries
 #=========================================
-require(RCurl)
-require(SuperLearner)
-require(glmnet)
-require(gbm)
-require(randomForest)
-require(survival)
+# Install and load packages
+pkgs <- c("RCurl","SuperLearner","glmnet","gbm","rpart","randomForest","survival","moments","flexsurv",
+          "sandwich","quantreg","caret")
+for (pkg in pkgs) {
+  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+  require(pkg)
+}
 
 # load Super Learner functions from github
 eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/SuperLearnerWrappers.R")))
@@ -20,7 +21,6 @@ eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/m
 
 # load the simulated data from github
 healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/Mock%20FCS%20Analysis/healthdata.csv")
-
 dat <- read.csv(textConnection(healthdata),header=TRUE)
 
 # create interaction variables
@@ -28,6 +28,18 @@ dat$sofaInt <- dat$trt*dat$sofa
 dat$scoreInt <- dat$trt*dat$score
 dat$femaleInt <- dat$trt*dat$female
 dat$raceInt <- dat$trt*dat$race
+dat$ageInt <- dat$trt*dat$age
+
+# make data frames to be used later by hc.tmle()
+X <- dat[,which(!(colnames(dat) %in% c("pid","totalcost","directcost")))]
+X1 <- X0 <- X
+X1$trt <- 1; X0$trt <- 0
+X1$ageInt <- X1$age
+X1$femaleInt <- X1$female
+X1$raceInt <- X1$race
+X1$sofaInt <- X1$sofa
+X1$score <- X1$score
+X0[,grep("Int",names(X0))] <- 0
 
 #=========================================
 # Set up Super Learner Library
@@ -69,26 +81,18 @@ mySLlibrary <- append(mySLlibrary,list(c("SL.hal","medScreen")))
 ## add in unadjusted
 mySLlibrary <- append(mySLlibrary,list(c("SL.mean","All")))
 
-#==================================================
-# inference with SuperLearner + candidate methods
-#==================================================
-set.seed(1289525)
+## to speed up analysis, you could truncate the library
+nalgos <- 10
+mySLlibrary <- mySLlibrary[1:nalgos]
 
 # make methods using bounded log-likelihood loss
 makeBoundedMethod(upperBound=max(dat$totalcost), lowerBound=min(dat$totalcost), name="methodTotal")
 makeBoundedMethod(upperBound=max(dat$directcost), lowerBound=min(dat$direct), name="methodDirect")
 
-# make data frames to be used later by hc.tmle()
-X <- dat[,which(!(colnames(dat) %in% c("pid","totalcost","directcost")))]
-X1 <- X0 <- X
-X1$trt <- 1; X0$trt <- 0
-X1$ageInt <- X1$age
-X1$femaleInt <- X1$female
-X1$raceInt <- X1$race
-X1$sofaInt <- X1$sofa
-X1$score <- X1$score
-X0[,grep("Int",names(X0))] <- 0
-
+#==================================================
+# inference with SuperLearner + candidate methods
+#==================================================
+set.seed(1289525)
 
 #==================
 # Total ICU costs
@@ -103,7 +107,8 @@ Y <- dat$totalcost
 fm <- SuperLearner(Y=Y,X=X,family=gaussian(), SL.library=mySLlibrary,
                    verbose=FALSE,method="methodTotal",
                    cvControl=list(V=10L, stratify=FALSE, shuffle=FALSE, validRows=folds))
-totalOut <- hc.tmle(Y=Y,X=X,X0=X0,X1=X1,fm=fm)
+totalOut <- hc.tmle(Y=Y,X=X,X0=X0,X1=X1,fm=fm,trt="trt")
+
 
 #=================================
 # Direct-variable ICU costs
@@ -116,7 +121,7 @@ folds <- split(ordDC, factor(v))
 Y <- dat$directcost
 fmD <- SuperLearner(Y=Y,X=X,family=gaussian(), SL.library=mySLlibrary,
                     verbose=FALSE,method="methodDirect")
-directOut <- allTMLE(Y=Y,X=X,X0=X0,X1=X1,fm=fmD)
+directOut <- hc.tmle(Y=Y,X=X,X0=X0,X1=X1,fm=fmD)
 
 
 #=================================
@@ -179,6 +184,7 @@ Y <- dat$totalcost
 fm <- CV.SuperLearner(Y = Y, X = X, V=10,
                       SL.library = mySLlibrary, verbose=TRUE,
                       method = "methodTotal")
+
 # cross-validated risk plot
 plot.my.CV.SuperLearner(fm)
 
