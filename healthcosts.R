@@ -957,7 +957,7 @@ makeSparseMat <- function(X,newX=X, verbose=FALSE){
 #============================================================
 hc.listWrappers <- function(what="both"){
   if (what == "both") {
-    message("All prediction algorithm wrappers in healthcost:\n")
+    message("All prediction algorithm wrappers in healthcosts:\n")
     message("GLMs:\n")
     print(c("SL.gammaIdentityGLM","SL.gammaLogGLM", "SL.gaussianLogGLM",
             "SL.logOLS.smear", "SL.manningGLM"))
@@ -969,11 +969,11 @@ hc.listWrappers <- function(what="both"){
     message("  Nonparametric methods:\n")
     print(c("SL.caret1",  "SL.gbm.caret1","SL.rf.caret1", "SL.rpart.caret1"))
 
-    message("\nAll screening algorithm wrappers in SuperLearner:\n")
+    message("\nAll screening algorithm wrappers in healthcosts:\n")
     print("No additional screening wrappers")
   }
   else if (what == "SL") {
-    message("All prediction algorithm wrappers in healthcost:\n")
+    message("All prediction algorithm wrappers in healthcosts:\n")
     message("   GLMs:\n")
     print(c("SL.gammaIdentityGLM","SL.gammaLogGLM", "SL.gaussianLogGLM",
             "SL.logOLS.smear", "SL.manningGLM"))
@@ -986,7 +986,7 @@ hc.listWrappers <- function(what="both"){
     print(c("SL.caret1",  "SL.gbm.caret1","SL.rf.caret1", "SL.rpart.caret1"))
   }
   else if (what == "screen") {
-    message("\nAll screening algorithm wrappers in SuperLearner:\n")
+    message("\nAll screening algorithm wrappers in healthcosts:\n")
     print("No additional screening wrappers")
   }
   else if (what == "method") {
