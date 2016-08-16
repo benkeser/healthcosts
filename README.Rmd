@@ -6,26 +6,28 @@ output: html_document
 ---
 ## Introduction
 
-In this demonstration, we illustrate how algorithms from the `healthcost` repository can be integrated with the existing `SuperLearner` R package. Using simulated data, we illustrate how to implement the algorithms designed specifically for estimating health care costs. We show how the performance of the Super Learner can be evaluated using cross-validation. Finally, we illustrate a function to estimate treatment effects using TMLE. 
+This repository is associated with the manuscript titled "Machine learning for estimating the effect of an intervention on ICU costs". In the "Mock FCS Analysis" folder, the file `dataAnalysis.R` presents the code that was used in the analysis in that paper. However, due to privacy agreements, the real data cannot be shared and so the analysis is performed on a simulated data set instead. In the "Simulation" folder, the files used for the simulation study in the manuscript can be found. 
 
-## Installing healthcost package
+The remainder of this README illustrates how algorithms from the `healthcosts` repository can be integrated with the existing `SuperLearner` R package.
+
+## Loading functions from the healthcost repository
 Until a proper R package is constructed, we can use a workaround to source the `healthcost` functions directly from GitHub.
 
 ```{r sourcehttps, message=FALSE}
 require(RCurl)
 
-# load the health cost functions from github
-eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthcost.R")))
+# load healthcost Super Learner functions from github
+eval(parse(text=getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthcosts.R")))
 
+# load the mock FCS data 
 # load the simulated data from github
-healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/healthdata.csv")
-
+healthdata <- getURL("https://raw.githubusercontent.com/benkeser/healthcosts/master/Mock%20FCS%20Analysis/healthdata.csv")
 dat <- read.csv(textConnection(healthdata),header=TRUE)
 ```
 
 
 ## Super Learner with a simple library
-We first illustrate a basic use of the `SuperLearner` function. Our goal is to predict total ICU costs (`totalcost`) as a function of treatment assignment (`trt`), gender (`female`), race (`race`), and SOFA score (`sofa`). We will consider only a simple library of algorithms: GLM with log-link and Gamma family, GLM with identity-link and Gamma family, and the algorithm proposed by Manning (2001) to adaptively select a GLM. Each GLM only includes a main effects term for each of the covariates. These three algorithms are implemented in the functions `SL.gammaLogGLM`, `SL.gammaIdentityGLM`, and `SL.manningGLM`. Later, we will take a look at how these algorithms are constructed. 
+We first illustrate a basic use of the `SuperLearner` function. We will predict total ICU costs (`totalcost`) based on treatment assignment (`trt`), gender (`female`), race (`race`), and SOFA score (`sofa`). We consider only a simple library of algorithms: GLM with log-link and Gamma family, GLM with identity-link and Gamma family, and the algorithm proposed by Manning (2001) to adaptively select a GLM. Each GLM only includes a main effects term for each of the covariates. These three algorithms are implemented in the functions `SL.gammaLogGLM`, `SL.gammaIdentityGLM`, and `SL.manningGLM`. Later, we will take a look at how these algorithms are constructed. 
 
 ```{r sl1, message=FALSE}
 # load the Super Learner package
@@ -44,7 +46,7 @@ sl1 <- SuperLearner(
 sl1
 ```
 
-By default `SuperLearner` will use ten-fold cross validation and mean squared-error as the loss function. From the output we see that the algorithm `r names(which(sl1$cvRisk==min(sl1$cvRisk)))` had the lowest cross-validated risk and is thus the discrete Super Learner. In fact, the best weighted combination of these three algorithms was judged to give all the weight to the `SL.manningGLM` algorithm and no weight to the other two algorithms. We will discuss why the name of each algorithm has been augmented with the suffix `_All` when we illustrate variable screening functions later in the document. 
+By default `SuperLearner` uses ten-fold cross validation and mean squared-error as the loss function. From the output we see that the algorithm `r names(which(sl1$cvRisk==min(sl1$cvRisk)))` had the lowest cross-validated risk and is thus the discrete Super Learner. In fact, the best weighted combination of these three algorithms was judged to give all the weight to the `SL.manningGLM` algorithm and no weight to the other two algorithms. We will discuss why the name of each algorithm has been augmented with the suffix `_All` when we illustrate variable screening functions later in the document. 
 
 Predictions from the discrete and continuous Super Learner on the observed data can now be obtained as follows:
 ```{r predsl1, message=FALSE, cache=TRUE, warning=FALSE}
@@ -85,6 +87,27 @@ glmObject <- sl1$fitLibrary$SL.gammaLogGLM_All$object
 summary(glmObject)
 ```
 
+## Super Learner using bounded log-likelihood loss 
+The bounded log-likelihood loss function is not included in the `SuperLearner` package by deafult. Nevertheless, the package provides the flexibility to provide your own loss function/ensemble through the use of the `method` option. A `method` is a list with a specific structure as explained in the `SuperLeaner` documentation. Our repository provides a means of reading such a list into memory via the `makeBoundedMethod` function:
+```{r makeMethod}
+# read a method called "boundedMethod1" into memory
+makeBoundedMethod(upperBound=max(dat$totalcost), lowerBound=min(dat$totalcost),
+                  name="boundedMethod1")
+```
+We can now re-fit the previous SuperLearner using this loss function instead of the default squared-error loss. 
+
+```{r methodSL}
+# execute the call to SuperLearner
+sl2 <- SuperLearner(
+  Y = dat$totalcost, # Y is the outcome variable
+  X = dat[,c("female","sofa","race","trt")], # X is a dataframe of predictor variables
+  SL.library = c("SL.gammaLogGLM","SL.gammaIdentityGLM","SL.manningGLM"), # this is our library specified as a vector of functions
+  method="boundedMethod1" # this is the method object we just made
+)
+
+sl2
+```
+
 ## Evaluating the Super Learner
 The `SuperLearner` package comes with an additional function to objectively evaluate the performance of the SuperLearner predictions relative to those from its component methods. This is achieved by adding an additional outer layer of V-fold cross-validation to the procedure. That is the data is split into, for example twenty equally sized pieces and each algorithm is trained on nine-tenths of the data -- including the Super Learner, which itself uses 10-fold cross-validation -- and evaluated on the remaining piece. Each piece of data serves as the evaluation set once and the cross-validated risk of the Super Learner and each component algorithm is computed. 
 
@@ -116,12 +139,29 @@ plot(cvsl1)
 
 The plot shows the ordered cross-validated risk estimates and 95\% confidence intervals about these estimates for each of the candidate algorithms, in addition to the discrete and continuous Super Learner. In this case, we see that the Manning (2001) algorithm has the lowest cross-validated risk, followed closely by the two Super Learners. However, the confidence intervals are wide and it is difficult at these small sample sizes to determine which method performs best. 
 
+By default the `SuperLearner` package does not contain a plotting function when the Super Learner is fit using bounded log-likelihood loss. This can be facilitated through the use of the `plot.my.CV.SuperLearner` function included in this repository.
+
+```{r cvSuperLearner2, message=FALSE, cache=TRUE, warning=FALSE}
+# set seed to ensure reproducibility
+set.seed(1234)
+
+# fit cross-validated super learner
+cvsl2 <- CV.SuperLearner(
+  Y=dat$totalcost, 
+  X = dat[,c("female","sofa","race","trt")],
+  SL.library = c("SL.gammaLogGLM","SL.gammaIdentityGLM","SL.manningGLM"),
+  method="boundedMethod1"
+)
+
+plot.my.CV.SuperLearner(cvsl2)
+```
+
 ## Writing prediction algorithms for Super Learner
 We now discuss how to supply new prediction algorithms to the `SuperLearner` function. First, it is useful to check the algorithms that are included in the `SuperLearner` by default: 
 ```{r listwrap}
 listWrappers()
 ```
-We can also check what is included in the `healthcost` software by default:
+We can also check what is included in the `healthcosts` repository:
 ```{r listwraphc}
 hc.listWrappers()
 ```
@@ -186,18 +226,18 @@ These new algorithms can now be added to the library we used previously:
 ```{r newsl, cache=TRUE, warning=FALSE}
 set.seed(12345)
 
-sl2 <- SuperLearner(
+sl3 <- SuperLearner(
   Y = dat$totalcost,
   X = dat[,c("female","sofa","race","trt")], 
   SL.library = c("SL.gammaLogGLM","SL.gammaIdentityGLM","SL.manningGLM","SL.gammaLogGLM.ns","SL.gammaLogGLM.ns2"))
 
-sl2
+sl3
 ```
 
 We can double check to make sure that `predict.SL.glm` works for our the new algorithms we defined by attempting to predict on a new observation:
 ```{r newslpred}
-slPredNew2 <- predict(sl2,newdata=newObs)
-slPredNew2
+slPredNew3 <- predict(sl3,newdata=newObs)
+slPredNew3
 ```
 
 
@@ -230,7 +270,7 @@ Now we can fit the SuperLearner using the three original algorithms each with an
 set.seed(1234) 
 
 # Fit the Super Learner
-sl3 <- SuperLearner(
+sl4 <- SuperLearner(
   Y=dat$totalcost, 
   X=myX,
   SL.library=list(c("SL.gammaLogGLM","All"),c("SL.gammaLogGLM","noInt"),
@@ -238,7 +278,7 @@ sl3 <- SuperLearner(
                   c("SL.manningGLM","All"),c("SL.manningGLM","noInt"))
   )
 
-sl3
+sl4
 ```
 
 Note that the output for `sl3` lists six algorithms: the three original algorithms each with the interaction (`_All`) and without (`_noInt`). Note that this explains why the output for `sl1` contained the "_All" addendum -- by default `SuperLearner` uses all the `All` screening function to pass through all variables in `X` to the prediction algorithms. 
@@ -283,13 +323,13 @@ allWangZhou
 
 We can now use Super Learner to evaluate the performance of the Wang (2009) method using various tuning parameter values:
 ```{r wangzhousl, message=FALSE, warning=FALSE, cache=TRUE}
-sl4 <- SuperLearner(
+sl5 <- SuperLearner(
   Y=dat$totalcost, 
   X=dat[,c("female","sofa","race","trt")],
   SL.library=allWangZhou  
   )
 
-sl4
+sl5
 ```
 
 
@@ -306,21 +346,66 @@ SL.gbm.caret2 <- function(...,method="gbm",tuneLength=8, trControl=trainControl(
 ```
 
 We can now implement the Super Learner. Note that the run time on this Super Learner will be considerably longer than previous runs due to the additional layers of cross validation.
-```{r sl5, message=FALSE, warnings=FALSE, cache=TRUE}
+```{r sl6, message=FALSE, warnings=FALSE, cache=TRUE}
 # load caret and gbm package
 require(caret)
 require(gbm)
 
 set.seed(12345)
 # fit super learner using three GBMs
-sl5 <- SuperLearner(
+sl6 <- SuperLearner(
   Y=dat$totalcost, 
   X=dat[,c("female","sofa","race","trt")],
   SL.library=c("SL.gbm","SL.gbm.caret1","SL.gbm.caret2")  
   )
 
-sl5
+sl6
 ```
 
+## Combining Super Learning with TMLE
+For the analysis of the FCS data in the manuscript, we implemented our own version of TMLE using the `hc.tmle` function included in this repository. This function implements the bounded log-likelihood loss-based fluctutation and provides Wald-style confidence intervals and two-sided p-values based on influence-curve-based standard errors, as described in the manuscript. This function requires three versions of the `data.frame` `X` that was used in the original Super Learner fit: the observed version and a version with `trt` set to 1 and 0. For these latter two, this would also require adjusting any columns corresponding to cross products to what they would be if `trt=1` and `trt=0`. We give an example of this below
+```{r sl7, message=FALSE, warnings=FALSE, cache=TRUE}
+# make an interaction variable
+dat$raceInt <- dat$trt*dat$race
 
+# fit the SuperLearner with simple library
+set.seed(12345)
+sl7 <- SuperLearner(
+  Y=dat$totalcost, 
+  X=dat[,c("female","sofa","race","trt","raceInt")],
+  SL.library=c("SL.glm", "SL.mean","SL.gammaLogGLM"),
+  method=boundedMethod1
+  )
+
+### make data.frames needed by hc.tmle
+X <- dat[,c("female","sofa","race","trt","raceInt")]
+## data.frame with trt = 0 
+X0 <- X
+# first set trt = 0
+X0$trt <- 0
+# now set raceInt = 0
+X0$raceInt <- X0$trt*X0$race
+
+# now do the same thing for trt=1
+X1 <- X
+X1$trt <- 1
+X1$raceInt <- X1$trt*X1$race
+
+tmleEst <- hc.tmle(
+  fm = sl7, # outcome regression used
+  Y = dat$totalcost, # outcome used in SL
+  X = X, # data.frame used in SL
+  X0 = X0, # data.frame with trt set = 0
+  X1 = X1, # data.frame with trt set = 1
+  trt = "trt", # the name of the column of X corrsponding with treatment
+  onlySL = FALSE # return inference for all candidates in addition to SL
+)
+
+tmleEst
+```
+The object `tmleEst` has three components: `slTMLE` the Super Learner-based TMLE estimate, `dslTMLE` the discrete Super Learner-based TMLE estimate, and `allCandTMLE` the TMLE based on each candidate method individually. We can access the inference for the initial estimator based on the standard linear regression `SL.glm` via 
+```{r candtmle, message=FALSE, warnings=FALSE, cache=TRUE}
+tmleEst$allCandTMLE$SL.glm
+```
+The `tmle` package can also be used to obtain inference and is implemented in many ways more generally than `hc.tmle`. However, by default we cannot make use of Super Learners based on bounded log-likelihood loss, nor obtain inference for each candidate method separately. Nevertheless,`tmle` does offer significantly more flexibility in its ability to handle observational data, missing data, continuously valued treatments, and other features. We refer interested readers to the package's documentation for information. 
 
